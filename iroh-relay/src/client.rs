@@ -150,6 +150,9 @@ pub struct ClientBuilder {
     tls_config: Option<rustls::ClientConfig>,
     /// HTTP Proxy
     proxy_url: Option<Url>,
+    #[cfg(any(target_os = "linux", target_os = "android", target_os = "fuchsia"))]
+    /// Bind relay TCP sockets to a specific device using `SO_BINDTODEVICE`.
+    bind_device: Option<Vec<u8>>,
     /// The secret key of this client.
     secret_key: SecretKey,
     /// Optional authorization token.
@@ -175,6 +178,8 @@ impl ClientBuilder {
             url: url.into(),
             tls_config: None,
             proxy_url: None,
+            #[cfg(any(target_os = "linux", target_os = "android", target_os = "fuchsia"))]
+            bind_device: None,
             secret_key,
             #[cfg(not(wasm_browser))]
             dns_resolver,
@@ -246,6 +251,13 @@ impl ClientBuilder {
         self
     }
 
+    /// Bind relay TCP sockets to a specific device using `SO_BINDTODEVICE`.
+    #[cfg(any(target_os = "linux", target_os = "android", target_os = "fuchsia"))]
+    pub fn bind_device(mut self, ifname: Vec<u8>) -> Self {
+        self.bind_device = Some(ifname);
+        self
+    }
+
     /// Set the capacity of the cache for public keys.
     pub fn key_cache_capacity(mut self, capacity: usize) -> Self {
         self.key_cache = KeyCache::new(capacity);
@@ -292,6 +304,10 @@ impl ClientBuilder {
             MaybeTlsStreamBuilder::new(dial_url.clone(), self.dns_resolver.clone(), tls_config)
                 .prefer_ipv6(self.prefer_ipv6())
                 .proxy_url(self.proxy_url.clone());
+        #[cfg(any(target_os = "linux", target_os = "android", target_os = "fuchsia"))]
+        if let Some(bind_device) = &self.bind_device {
+            builder = builder.bind_device(bind_device.clone());
+        }
 
         let stream = builder.connect().await?;
         let local_addr = stream

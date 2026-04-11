@@ -137,6 +137,8 @@ pub struct Builder {
     /// [`Builder::address_lookup`].
     addr_filter: Option<AddrFilter>,
     proxy_url: Option<Url>,
+    #[cfg(any(target_os = "linux", target_os = "android", target_os = "fuchsia"))]
+    relay_bind_device: Option<Vec<u8>>,
     ca_tls_config: Option<CaTlsConfig>,
     #[cfg(not(wasm_browser))]
     dns_resolver: Option<DnsResolver>,
@@ -205,6 +207,8 @@ impl Builder {
             address_lookup_user_data: Default::default(),
             addr_filter: None,
             proxy_url: None,
+            #[cfg(any(target_os = "linux", target_os = "android", target_os = "fuchsia"))]
+            relay_bind_device: None,
             ca_tls_config: None,
             #[cfg(not(wasm_browser))]
             dns_resolver: None,
@@ -268,6 +272,8 @@ impl Builder {
             secret_key,
             address_lookup_user_data: self.address_lookup_user_data,
             proxy_url: self.proxy_url,
+            #[cfg(any(target_os = "linux", target_os = "android", target_os = "fuchsia"))]
+            relay_bind_device: self.relay_bind_device,
             #[cfg(not(wasm_browser))]
             dns_resolver,
             server_config,
@@ -689,6 +695,16 @@ impl Builder {
     /// Sets an explicit proxy url to proxy all HTTP(S) traffic through.
     pub fn proxy_url(mut self, url: Url) -> Self {
         self.proxy_url.replace(url);
+        self
+    }
+
+    /// Binds relay TCP egress to a specific network interface using `SO_BINDTODEVICE`.
+    ///
+    /// This only affects relay connections. Direct UDP transports continue to use their
+    /// configured bind addresses.
+    #[cfg(any(target_os = "linux", target_os = "android", target_os = "fuchsia"))]
+    pub fn relay_bind_device(mut self, ifname: impl Into<Vec<u8>>) -> Self {
+        self.relay_bind_device = Some(ifname.into());
         self
     }
 

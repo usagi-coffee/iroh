@@ -205,6 +205,8 @@ struct RelayConnectionOptions {
     #[cfg(not(wasm_browser))]
     dns_resolver: DnsResolver,
     proxy_url: Option<Url>,
+    #[cfg(any(target_os = "linux", target_os = "android", target_os = "fuchsia"))]
+    bind_device: Option<Vec<u8>>,
     prefer_ipv6: Arc<AtomicBool>,
     tls_config: rustls::ClientConfig,
     auth_token: Option<String>,
@@ -294,6 +296,8 @@ impl ActiveRelayActor {
             #[cfg(not(wasm_browser))]
             dns_resolver,
             proxy_url,
+            #[cfg(any(target_os = "linux", target_os = "android", target_os = "fuchsia"))]
+            bind_device,
             prefer_ipv6,
             tls_config,
             auth_token,
@@ -313,6 +317,10 @@ impl ActiveRelayActor {
 
         if let Some(token) = auth_token {
             builder = builder.auth_token(token);
+        }
+        #[cfg(any(target_os = "linux", target_os = "android", target_os = "fuchsia"))]
+        if let Some(bind_device) = bind_device {
+            builder = builder.bind_device(bind_device);
         }
         builder
     }
@@ -872,6 +880,8 @@ pub(crate) struct Config {
     pub dns_resolver: DnsResolver,
     /// Proxy
     pub proxy_url: Option<Url>,
+    #[cfg(any(target_os = "linux", target_os = "android", target_os = "fuchsia"))]
+    pub bind_device: Option<Vec<u8>>,
     /// If the last net_report report, reports IPv6 to be available.
     pub ipv6_reported: Arc<AtomicBool>,
     pub tls_config: rustls::ClientConfig,
@@ -1243,6 +1253,8 @@ impl RelayActor {
             #[cfg(not(wasm_browser))]
             dns_resolver: self.config.dns_resolver.clone(),
             proxy_url: self.config.proxy_url.clone(),
+            #[cfg(any(target_os = "linux", target_os = "android", target_os = "fuchsia"))]
+            bind_device: self.config.bind_device.clone(),
             prefer_ipv6: self.config.ipv6_reported.clone(),
             tls_config: self.config.tls_config.clone(),
             auth_token,
@@ -1432,6 +1444,8 @@ mod tests {
                 secret_key,
                 dns_resolver: DnsResolver::new(),
                 proxy_url: None,
+                #[cfg(any(target_os = "linux", target_os = "android", target_os = "fuchsia"))]
+                bind_device: None,
                 prefer_ipv6: Arc::new(AtomicBool::new(true)),
                 tls_config: CaTlsConfig::insecure_skip_verify()
                     .client_config(default_provider())

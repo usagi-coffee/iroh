@@ -6,7 +6,10 @@
 
 // Based on tailscale/derp/derphttp/derphttp_client.go
 
-use std::{collections::VecDeque, net::IpAddr};
+use std::{
+    collections::VecDeque,
+    net::{IpAddr, SocketAddr},
+};
 
 use bytes::Bytes;
 use data_encoding::BASE64URL;
@@ -33,6 +36,8 @@ pub(super) struct MaybeTlsStreamBuilder {
     url: Url,
     dns_resolver: DnsResolver,
     proxy_url: Option<Url>,
+    #[cfg(any(target_os = "linux", target_os = "android", target_os = "fuchsia"))]
+    bind_device: Option<Vec<u8>>,
     prefer_ipv6: bool,
     tls_config: rustls::ClientConfig,
 }
@@ -47,6 +52,8 @@ impl MaybeTlsStreamBuilder {
             url,
             dns_resolver,
             proxy_url: None,
+            #[cfg(any(target_os = "linux", target_os = "android", target_os = "fuchsia"))]
+            bind_device: None,
             prefer_ipv6: false,
             tls_config,
         }
@@ -59,6 +66,12 @@ impl MaybeTlsStreamBuilder {
 
     pub(super) fn prefer_ipv6(mut self, prefer: bool) -> Self {
         self.prefer_ipv6 = prefer;
+        self
+    }
+
+    #[cfg(any(target_os = "linux", target_os = "android", target_os = "fuchsia"))]
+    pub(super) fn bind_device(mut self, bind_device: Vec<u8>) -> Self {
+        self.bind_device = Some(bind_device);
         self
     }
 
@@ -118,8 +131,9 @@ impl MaybeTlsStreamBuilder {
             let stream = self.dial_url_proxy(proxy.clone(), tls_connector).await?;
             Ok(ProxyStream::Proxied(stream))
         } else {
-            let stream =
-                dial_happy_eyeballs(&self.dns_resolver, &self.url, self.prefer_ipv6).await?;
+            let stream = self
+                .dial_happy_eyeballs(&self.dns_resolver, &self.url, self.prefer_ipv6)
+                .await?;
             Ok(ProxyStream::Raw(stream))
         }
     }
@@ -132,7 +146,8 @@ impl MaybeTlsStreamBuilder {
     {
         debug!(%self.url, %proxy_url, "dial url via proxy");
 
-        let tcp_stream = dial_happy_eyeballs(&self.dns_resolver, &proxy_url, self.prefer_ipv6)
+        let tcp_stream = self
+            .dial_happy_eyeballs(&self.dns_resolver, &proxy_url, self.prefer_ipv6)
             .await
             .map_err(|err| match err {
                 DialError::InvalidTargetPort { meta } => DialError::ProxyInvalidTargetPort { meta },
@@ -224,6 +239,30 @@ impl MaybeTlsStreamBuilder {
 
         Ok(res)
     }
+
+    fn tcp_socket_for_addr(&self, addr: SocketAddr) -> Result<tokio::net::TcpSocket, DialError> {
+        let socket = match addr {
+            SocketAddr::V4(_) => tokio::net::TcpSocket::new_v4()?,
+            SocketAddr::V6(_) => tokio::net::TcpSocket::new_v6()?,
+        };
+        #[cfg(any(target_os = "linux", target_os = "android", target_os = "fuchsia"))]
+        if let Some(bind_device) = &self.bind_device {
+            socket.bind_device(Some(bind_device.as_slice()))?;
+        }
+        Ok(socket)
+    }
+
+    async fn dial_happy_eyeballs(
+        &self,
+        dns_resolver: &DnsResolver,
+        url: &Url,
+        prefer_ipv6: bool,
+    ) -> Result<TcpStream, DialError> {
+        dial_happy_eyeballs(dns_resolver, url, prefer_ipv6, |addr| {
+            self.tcp_socket_for_addr(addr)
+        })
+        .await
+    }
 }
 
 /// Resolves `url` and races TCP connections across the resulting addresses,
@@ -247,6 +286,7 @@ async fn dial_happy_eyeballs(
     dns_resolver: &DnsResolver,
     url: &Url,
     prefer_ipv6: bool,
+    make_socket: impl Fn(SocketAddr) -> Result<tokio::net::TcpSocket, DialError>,
 ) -> Result<TcpStream, DialError> {
     let port = url_port(url).ok_or_else(|| e!(DialError::InvalidTargetPort))?;
 
@@ -281,10 +321,11 @@ async fn dial_happy_eyeballs(
             && let Some(ip) = pop_family(&mut queue, &mut next_prefer_v6)
         {
             let addr = SocketAddr::new(ip, port);
+            let socket = make_socket(addr)?;
             dials.push(
                 async move {
                     trace!("connecting TCP stream");
-                    let stream = time::timeout(DIAL_ENDPOINT_TIMEOUT, TcpStream::connect(addr))
+                    let stream = time::timeout(DIAL_ENDPOINT_TIMEOUT, socket.connect(addr))
                         .await
                         .map_err(DialError::from)
                         .and_then(|res| res.map_err(DialError::from))
@@ -389,6 +430,14 @@ mod tests {
             .expect("valid url")
     }
 
+    fn tcp_socket_for_addr(addr: SocketAddr) -> Result<tokio::net::TcpSocket, DialError> {
+        match addr {
+            SocketAddr::V4(_) => tokio::net::TcpSocket::new_v4(),
+            SocketAddr::V6(_) => tokio::net::TcpSocket::new_v6(),
+        }
+        .map_err(Into::into)
+    }
+
     /// An unreachable IPv4 address (RFC 5737 TEST-NET-1).
     fn dead_v4(n: u8) -> Ipv4Addr {
         Ipv4Addr::new(192, 0, 2, n)
@@ -407,7 +456,7 @@ mod tests {
 
         let addrs = (1..5).map(dead_v4).chain([Ipv4Addr::LOCALHOST]).collect();
         let resolver = static_resolver(addrs, vec![]);
-        let stream = dial_happy_eyeballs(&resolver, &relay_url(port), false)
+        let stream = dial_happy_eyeballs(&resolver, &relay_url(port), false, tcp_socket_for_addr)
             .await
             .expect("should skip the invalid addrs and still connect");
         assert_eq!(stream.peer_addr().unwrap().ip(), Ipv4Addr::LOCALHOST);
@@ -420,7 +469,7 @@ mod tests {
         let port = listener.local_addr().unwrap().port();
         let resolver = static_resolver(vec![Ipv4Addr::LOCALHOST], vec![dead_v6(1), dead_v6(2)]);
 
-        let stream = dial_happy_eyeballs(&resolver, &relay_url(port), true)
+        let stream = dial_happy_eyeballs(&resolver, &relay_url(port), true, tcp_socket_for_addr)
             .await
             .expect("falls back to IPv4");
         assert!(stream.peer_addr().unwrap().is_ipv4());
@@ -429,7 +478,7 @@ mod tests {
     #[tokio::test]
     async fn errors_when_all_addresses_unreachable() {
         let resolver = static_resolver(vec![dead_v4(1), dead_v4(2)], vec![dead_v6(1)]);
-        let err = dial_happy_eyeballs(&resolver, &relay_url(80), true)
+        let err = dial_happy_eyeballs(&resolver, &relay_url(80), true, tcp_socket_for_addr)
             .await
             .expect_err("nothing reachable");
         dbg!(&err);
@@ -442,7 +491,7 @@ mod tests {
     #[tokio::test]
     async fn errors_when_nothing_resolves() {
         let resolver = static_resolver(vec![], vec![]);
-        let err = dial_happy_eyeballs(&resolver, &relay_url(80), false)
+        let err = dial_happy_eyeballs(&resolver, &relay_url(80), false, tcp_socket_for_addr)
             .await
             .expect_err("no addresses to dial");
         assert!(matches!(err, DialError::Dns { .. }));

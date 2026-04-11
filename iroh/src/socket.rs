@@ -179,6 +179,10 @@ pub(crate) struct Options {
     /// Proxy configuration.
     pub(crate) proxy_url: Option<Url>,
 
+    /// Optional relay egress device binding using `SO_BINDTODEVICE`.
+    #[cfg(any(target_os = "linux", target_os = "android", target_os = "fuchsia"))]
+    pub(crate) relay_bind_device: Option<Vec<u8>>,
+
     /// TLS configuration for HTTPS and non-iroh-QUIC connections.
     pub(crate) tls_config: rustls::ClientConfig,
 
@@ -884,6 +888,8 @@ impl EndpointInner {
             #[cfg(not(wasm_browser))]
             dns_resolver,
             proxy_url,
+            #[cfg(any(target_os = "linux", target_os = "android", target_os = "fuchsia"))]
+            relay_bind_device,
             server_config,
             tls_config,
             metrics,
@@ -928,6 +934,8 @@ impl EndpointInner {
             #[cfg(not(wasm_browser))]
             dns_resolver: dns_resolver.clone(),
             proxy_url: proxy_url.clone(),
+            #[cfg(any(target_os = "linux", target_os = "android", target_os = "fuchsia"))]
+            bind_device: relay_bind_device.clone(),
             ipv6_reported: ipv6_reported.clone(),
             tls_config: tls_config.clone(),
             metrics: metrics.socket.clone(),
@@ -2170,6 +2178,8 @@ mod tests {
             ],
             secret_key,
             proxy_url: None,
+            #[cfg(any(target_os = "linux", target_os = "android", target_os = "fuchsia"))]
+            relay_bind_device: None,
             dns_resolver: DnsResolver::new(),
             server_config,
             tls_config: CaTlsConfig::default()
@@ -2589,6 +2599,8 @@ mod tests {
             address_lookup_user_data: None,
             dns_resolver,
             proxy_url: None,
+            #[cfg(any(target_os = "linux", target_os = "android", target_os = "fuchsia"))]
+            relay_bind_device: None,
             server_config,
             tls_config: CaTlsConfig::default()
                 .client_config(crypto_provider.clone())
