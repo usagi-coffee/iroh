@@ -191,6 +191,8 @@ impl Transports {
     pub(crate) fn bind(
         configs: &[TransportConfig],
         relay_actor_config: RelayActorConfig,
+        #[cfg(any(target_os = "linux", target_os = "android", target_os = "fuchsia"))]
+        direct_bind_device: Option<Vec<u8>>,
         metrics: &EndpointMetrics,
         shutdown_token: CancellationToken,
     ) -> io::Result<Self> {
@@ -223,7 +225,12 @@ impl Transports {
             ip_configs
         };
         #[cfg(not(wasm_browser))]
-        let ip = IpTransports::bind(ip_configs.into_iter(), metrics)?;
+        let ip = IpTransports::bind(
+            ip_configs.into_iter(),
+            #[cfg(any(target_os = "linux", target_os = "android", target_os = "fuchsia"))]
+            direct_bind_device.as_deref(),
+            metrics,
+        )?;
 
         let relay = configs
             .iter()

@@ -139,6 +139,8 @@ pub struct Builder {
     proxy_url: Option<Url>,
     #[cfg(any(target_os = "linux", target_os = "android", target_os = "fuchsia"))]
     relay_bind_device: Option<Vec<u8>>,
+    #[cfg(any(target_os = "linux", target_os = "android", target_os = "fuchsia"))]
+    direct_bind_device: Option<Vec<u8>>,
     ca_tls_config: Option<CaTlsConfig>,
     #[cfg(not(wasm_browser))]
     dns_resolver: Option<DnsResolver>,
@@ -209,6 +211,8 @@ impl Builder {
             proxy_url: None,
             #[cfg(any(target_os = "linux", target_os = "android", target_os = "fuchsia"))]
             relay_bind_device: None,
+            #[cfg(any(target_os = "linux", target_os = "android", target_os = "fuchsia"))]
+            direct_bind_device: None,
             ca_tls_config: None,
             #[cfg(not(wasm_browser))]
             dns_resolver: None,
@@ -274,6 +278,8 @@ impl Builder {
             proxy_url: self.proxy_url,
             #[cfg(any(target_os = "linux", target_os = "android", target_os = "fuchsia"))]
             relay_bind_device: self.relay_bind_device,
+            #[cfg(any(target_os = "linux", target_os = "android", target_os = "fuchsia"))]
+            direct_bind_device: self.direct_bind_device,
             #[cfg(not(wasm_browser))]
             dns_resolver,
             server_config,
@@ -705,6 +711,16 @@ impl Builder {
     #[cfg(any(target_os = "linux", target_os = "android", target_os = "fuchsia"))]
     pub fn relay_bind_device(mut self, ifname: impl Into<Vec<u8>>) -> Self {
         self.relay_bind_device = Some(ifname.into());
+        self
+    }
+
+    /// Binds direct UDP egress to a specific network interface using `SO_BINDTODEVICE`.
+    ///
+    /// This affects direct peer-to-peer UDP traffic. Relay TCP connections are controlled
+    /// separately with [`Self::relay_bind_device`].
+    #[cfg(any(target_os = "linux", target_os = "android", target_os = "fuchsia"))]
+    pub fn direct_bind_device(mut self, ifname: impl Into<Vec<u8>>) -> Self {
+        self.direct_bind_device = Some(ifname.into());
         self
     }
 

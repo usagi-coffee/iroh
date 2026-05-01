@@ -183,6 +183,10 @@ pub(crate) struct Options {
     #[cfg(any(target_os = "linux", target_os = "android", target_os = "fuchsia"))]
     pub(crate) relay_bind_device: Option<Vec<u8>>,
 
+    /// Optional direct UDP egress device binding using `SO_BINDTODEVICE`.
+    #[cfg(any(target_os = "linux", target_os = "android", target_os = "fuchsia"))]
+    pub(crate) direct_bind_device: Option<Vec<u8>>,
+
     /// TLS configuration for HTTPS and non-iroh-QUIC connections.
     pub(crate) tls_config: rustls::ClientConfig,
 
@@ -890,6 +894,8 @@ impl EndpointInner {
             proxy_url,
             #[cfg(any(target_os = "linux", target_os = "android", target_os = "fuchsia"))]
             relay_bind_device,
+            #[cfg(any(target_os = "linux", target_os = "android", target_os = "fuchsia"))]
+            direct_bind_device,
             server_config,
             tls_config,
             metrics,
@@ -948,6 +954,8 @@ impl EndpointInner {
         let transports = Transports::bind(
             &transport_configs,
             relay_actor_config,
+            #[cfg(any(target_os = "linux", target_os = "android", target_os = "fuchsia"))]
+            direct_bind_device,
             &metrics,
             shutdown_token.child_token(),
         )
@@ -2180,6 +2188,8 @@ mod tests {
             proxy_url: None,
             #[cfg(any(target_os = "linux", target_os = "android", target_os = "fuchsia"))]
             relay_bind_device: None,
+            #[cfg(any(target_os = "linux", target_os = "android", target_os = "fuchsia"))]
+            direct_bind_device: None,
             dns_resolver: DnsResolver::new(),
             server_config,
             tls_config: CaTlsConfig::default()
@@ -2601,6 +2611,8 @@ mod tests {
             proxy_url: None,
             #[cfg(any(target_os = "linux", target_os = "android", target_os = "fuchsia"))]
             relay_bind_device: None,
+            #[cfg(any(target_os = "linux", target_os = "android", target_os = "fuchsia"))]
+            direct_bind_device: None,
             server_config,
             tls_config: CaTlsConfig::default()
                 .client_config(crypto_provider.clone())
